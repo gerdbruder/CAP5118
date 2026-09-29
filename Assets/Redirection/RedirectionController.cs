@@ -1,0 +1,651 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using UnityEngine;
+
+[DefaultExecutionOrder(100)]
+public class RedirectionController : MonoBehaviour
+{
+    public Evaluation evaluation;
+    public GameObject cameraRig;
+
+    int e_lastTrial = -100;
+    float c_yawOffset = 0;
+    float e_maxAngle = 0;
+    float e_maxDistance = 0;
+
+    const double DTOR = Mathf.PI / 180.0;
+
+    public GameObject quad;
+    public GameObject quad_user;
+    public GameObject path;
+
+    Texture2D pReadyQuestion_;
+    Texture2D pQuestionR_;
+    Texture2D pQuestionT_;
+    Texture2D pQuestionC_;
+    Texture2D pAdjust_;
+    Texture2D pThankYou_;
+    Texture2D pUser_;
+    Texture2D pUserNoDir_;
+    Texture2D pPleaseWait_;
+    Texture2D p0_;
+    Texture2D p1_;
+    Texture2D p2_;
+    Texture2D p3R_;
+    Texture2D p3TC_;
+    Texture2D p4_;
+    Texture2D p4R_;
+    Texture2D p5R_;
+    Texture2D p5T_;
+    Texture2D p5C_;
+    Texture2D p6_;
+    const int SLIDES_R = 5;
+    Texture2D[] pSlideR_;
+    const int SLIDES_T = 7;
+    Texture2D[] pSlideT_;
+    const int SLIDES_C = 7;
+    Texture2D[] pSlideC_;
+
+    //NOTE: Not very efficient, but numerically stable
+    float reducePeriodic(float p)
+    {
+        // Reduces periodic p from real number space to [0, 2PI[
+        const float PI2 = 2 * (float)Mathf.PI;
+        while (p >= PI2)
+            p -= PI2;
+        while (p < 0)
+            p += PI2;
+        return p;
+    }
+
+    //NOTE: Not very efficient, but numerically stable
+    float periodicMinusPeriodic(float p1, float p2)
+    {
+        p1 = reducePeriodic(p1);
+        p2 = reducePeriodic(p2);
+
+        // p1 in [0, 2PI[
+        // p2 in [0, 2PI[
+        // result in [-PI, PI[
+
+        // We make the assumption that there is only a slight difference.
+        // This means that we can be in one of the following four cases:
+        // 
+        //        [0 . . . . . . . .2PI][0 . . . . . . . .2PI][0 . . . . . . . .2PI]
+        // Case A:  p2            p1      p2            p1      p2            p1
+        // Case B:  p1            p2      p1            p2      p1            p2
+        // Case C:      p1    p2              p1    p2              p1    p2
+        // Case C':     p2    p1              p2    p1              p2    p1
+
+        const float PI2 = 2 * (float)Mathf.PI;
+        float caseA = p1 - (p2 + PI2);
+        float caseB = p1 - (p2 - PI2);
+        float caseC = p1 - p2;
+        float absA = Mathf.Abs(caseA);
+        float absB = Mathf.Abs(caseB);
+        float absC = Mathf.Abs(caseC);
+
+        float tmp = 0;
+        if (absA < absB)
+        {
+            if (absA < absC)
+            {
+                // a < b, a < c
+                tmp = caseA;
+            }
+            else
+            {
+                // c <= a < b
+                tmp = caseC;
+            }
+        }
+        else
+        {
+            if (absC < absB)
+            {
+                // c < b <= a
+                tmp = caseC;
+            }
+            else
+            {
+                // b <= a, b <= c
+                tmp = caseB;
+            }
+        }
+        return tmp;
+    }
+
+
+    // Start is called once before the first execution of Update after the MonoBehaviour is created
+    void Start()
+    {
+        Screen.sleepTimeout = SleepTimeout.NeverSleep;
+
+        pReadyQuestion_ = Resources.Load<Texture2D>("Images/_exp_readyquestion");
+        pQuestionR_ = Resources.Load<Texture2D>("Images/_exp_questionR");
+        pQuestionT_ = Resources.Load<Texture2D>("Images/_exp_questionT");
+        pQuestionC_ = Resources.Load<Texture2D>("Images/_exp_questionC");
+        pAdjust_ = Resources.Load<Texture2D>("Images/_exp_adjust");
+        pThankYou_ = Resources.Load<Texture2D>("Images/_exp_thankyou");
+        pUser_ = Resources.Load<Texture2D>("Images/_exp_user");
+        pUserNoDir_ = Resources.Load<Texture2D>("Images/_exp_user_no_dir");
+        pPleaseWait_ = Resources.Load<Texture2D>("Images/_exp_pleasewait");
+        p0_ = Resources.Load<Texture2D>("Images/_exp_slide_0");
+        p1_ = Resources.Load<Texture2D>("Images/_exp_slide_1");
+        p2_ = Resources.Load<Texture2D>("Images/_exp_slide_2");
+        p3R_ = Resources.Load<Texture2D>("Images/_exp_slide_3R");
+        p3TC_ = Resources.Load<Texture2D>("Images/_exp_slide_3T");
+        p4_ = Resources.Load<Texture2D>("Images/_exp_slide_4");
+        p4R_ = Resources.Load<Texture2D>("Images/_exp_slide_4R");
+        p5R_ = Resources.Load<Texture2D>("Images/_exp_slide_5R");
+        p5T_ = Resources.Load<Texture2D>("Images/_exp_slide_5T");
+        p5C_ = Resources.Load<Texture2D>("Images/_exp_slide_5C");
+        p6_ = Resources.Load<Texture2D>("Images/_exp_slide_6");
+        pSlideR_ = new Texture2D[SLIDES_R];
+        pSlideR_[0] = p0_;
+        pSlideR_[1] = p3R_;
+        pSlideR_[2] = p4R_;
+        pSlideR_[3] = p5R_;
+        pSlideR_[4] = p6_;
+        pSlideT_ = new Texture2D[SLIDES_T];
+        pSlideT_[0] = p0_;
+        pSlideT_[1] = p1_;
+        pSlideT_[2] = p2_;
+        pSlideT_[3] = p3TC_;
+        pSlideT_[4] = p4_;
+        pSlideT_[5] = p5T_;
+        pSlideT_[6] = p6_;
+        pSlideC_ = new Texture2D[SLIDES_C];
+        pSlideC_[0] = p0_;
+        pSlideC_[1] = p1_;
+        pSlideC_[2] = p2_;
+        pSlideC_[3] = p3TC_;
+        pSlideC_[4] = p4_;
+        pSlideC_[5] = p5C_;
+        pSlideC_[6] = p6_;
+    }
+
+    private void OnEnable() => cameraRig.GetComponent<OVRCameraRig>().UpdatedAnchors += OnUpdatedAnchors;
+    private void OnDisable() => cameraRig.GetComponent<OVRCameraRig>().UpdatedAnchors -= OnUpdatedAnchors;
+
+    private void OnUpdatedAnchors(OVRCameraRig rig)
+    {
+        Transform centerEye = rig.centerEyeAnchor;
+        Transform leftEye = rig.leftEyeAnchor;
+        Transform rightEye = rig.rightEyeAnchor;
+        Vector3 leftOffset = leftEye.localPosition - centerEye.localPosition;
+        Vector3 rightOffset = rightEye.localPosition - centerEye.localPosition;
+
+        evaluation.outsideYaw = centerEye.transform.eulerAngles.y * Mathf.Deg2Rad;
+        evaluation.outsidePos = new Vector2(centerEye.localPosition.x, centerEye.localPosition.z);
+        evaluation.insideUpdate = true;
+
+        UpdateInternal();
+
+        Quaternion correctionRot = Quaternion.Euler(new Vector3(0, (evaluation.offsetYaw + evaluation.resetYaw) * Mathf.Rad2Deg, 0));
+        centerEye.localRotation = correctionRot * centerEye.localRotation;
+
+        correctionRot = Quaternion.Euler(new Vector3(0, evaluation.resetYaw * Mathf.Rad2Deg, 0));
+        Vector3 centerPosOld = centerEye.localPosition;
+        Vector3 centerPosNew = centerPosOld + new Vector3(evaluation.offsetPos.x, 0, evaluation.offsetPos.y) + new Vector3(evaluation.resetPos.x, 0, evaluation.resetPos.y);
+        centerEye.localPosition = correctionRot * centerPosNew;
+
+        if (evaluation.State == ExperimentState.ES_INSTRUCTION)
+        {
+            centerEye.localPosition = new Vector3(0, 1000.0f, 0);
+        }
+
+        //if (leftEye != null)
+        //{
+        //    leftEye.localPosition = centerPosNew + (correctionRot * leftOffset);
+        //    leftEye.localRotation = correctionRot * leftEye.localRotation;
+        //}
+        //if (rightEye != null)
+        //{
+        //    rightEye.localPosition = centerPosNew + (correctionRot * rightOffset);
+        //    rightEye.localRotation = correctionRot * rightEye.localRotation;
+        //}
+
+        evaluation.insideUpdate = false;
+        Debug.Log("pos(" + evaluation.getPos().x + ", " + evaluation.getPos().y + ") -- offsetPos(" + evaluation.offsetPos.x + ", " + evaluation.offsetPos.y + ")");
+
+        //        Debug.Log("yaw(" + evaluation.getYaw() / DTOR + ") -- yaw(" + evaluation.start_yaw / DTOR + ") -- offset(" + evaluation.offsetYaw / DTOR + ") -- reset(" + evaluation.resetYaw / DTOR + ")");
+    }
+
+    private void Update()
+    {
+    }
+
+    private void UpdateInternal()
+    {
+        switch (evaluation.State)
+        {
+            case ExperimentState.ES_UNDEFINED:
+                quad_user.GetComponent<Renderer>().enabled = false;
+                quad.GetComponent<Renderer>().enabled = true;
+                quad.GetComponent<Renderer>().material.mainTexture = pPleaseWait_;
+                break;
+
+            case ExperimentState.ES_READYQUESTION:
+                quad_user.GetComponent<Renderer>().enabled = false;
+                quad.GetComponent<Renderer>().enabled = true;
+                quad.GetComponent<Renderer>().material.mainTexture = pReadyQuestion_;
+
+                if (evaluation.EXP_TYPE == ExperimentType.ET_ROTATION)
+                    path.GetComponent<Renderer>().enabled = false;
+                else
+                    path.GetComponent<Renderer>().enabled = true;
+                break;
+
+            case ExperimentState.ES_SLIDES:
+                {
+                    quad_user.GetComponent<Renderer>().enabled = false;
+                    quad.GetComponent<Renderer>().enabled = true;
+
+                    if (evaluation.SKIP_SLIDES)
+                    {
+                        evaluation.StateChange();
+                        break;
+                    }
+
+                    int iNow = (int)(Time.realtimeSinceStartup * 1000f); // in ms
+                    int elapsed = iNow - (int)evaluation.StartTime; // in ms
+                    int slide = elapsed / 14000; //NITE: value seems okay
+                    if (evaluation.EXP_TYPE == ExperimentType.ET_ROTATION)
+                    {
+                        if (slide > SLIDES_R - 1)
+                            evaluation.StateChange();
+                        else
+                            quad.GetComponent<Renderer>().material.mainTexture = pSlideR_[slide];
+                    }
+                    else if (evaluation.EXP_TYPE == ExperimentType.ET_TRANSLATION)
+                    {
+                        if (slide > SLIDES_T - 1)
+                            evaluation.StateChange();
+                        else
+                            quad.GetComponent<Renderer>().material.mainTexture = pSlideT_[slide];
+                    }
+                    else // ET_CURVATURE
+                    {
+                        if (slide > SLIDES_C - 1)
+                            evaluation.StateChange();
+                        else
+                            quad.GetComponent<Renderer>().material.mainTexture = pSlideC_[slide];
+                    }
+                }
+                break;
+
+            case ExperimentState.ES_ACTIVE:
+                {
+                    quad_user.GetComponent<Renderer>().enabled = false;
+                    quad.GetComponent<Renderer>().enabled = false;
+
+                    // Get current gain value
+                    float gain = evaluation.ActiveTrial.Value;
+
+                    if (evaluation.EXP_TYPE == ExperimentType.ET_ROTATION)
+                    {
+                        // Random parts
+                        if (evaluation.ActiveTrialNumber != e_lastTrial)
+                        {
+                            e_lastTrial = evaluation.ActiveTrialNumber;
+
+                            evaluation.recenterPose();
+
+                            // Orientation (randomized in 360 degrees)
+                            float r1 = UnityEngine.Random.value; // in [0,1]
+                            evaluation.resetYaw = evaluation.resetYaw + r1 * (float)Mathf.PI * 2;
+
+                            evaluation.start_p = evaluation.getPos();
+                            evaluation.start_yaw = evaluation.getYaw();
+
+                            // Turn angle
+                            float r2 = UnityEngine.Random.value; // in [0,1]
+                            e_maxAngle = evaluation.ANGLE - (float)Mathf.PI / 8 + (float)Mathf.PI / 8 * r2;
+                            //e_maxAngle = evaluation.ANGLE;
+
+                            //                            Debug.Log("TRIAL(" + evaluation.ActiveTrialNumber + ")_START: yaw(" + evaluation.getYaw() / DTOR + ") -- yaw(" + periodicMinusPeriodic(evaluation.getYaw(), evaluation.start_yaw) / DTOR + ") * gain(" + gain + ") < angle(" + e_maxAngle / DTOR + ")");
+                        }
+
+                        // Compute yaw angle
+                        evaluation.reset();
+                        float diff = periodicMinusPeriodic(evaluation.getYaw(), evaluation.start_yaw);
+                        float yaw = evaluation.start_yaw + diff * gain;
+
+                        // Update orientation
+                        evaluation.setYawOffset(yaw);
+
+                        //                        Debug.Log("TRIAL(" + evaluation.ActiveTrialNumber + ")_MID: yaw(" + diff / DTOR + ") * gain(" + gain + ") ?? angle(" + e_maxAngle / DTOR + ")");
+
+                        // Check angle
+                        if (Mathf.Abs(diff) * gain >= e_maxAngle)
+                        {
+                            Debug.Log("TRIAL(" + evaluation.ActiveTrialNumber + ")_END: yaw(" + diff / DTOR + ") * gain(" + gain + ") > angle(" + e_maxAngle / DTOR + ")");
+                            //                            Debug.Log("--- statechange: start_yaw=" + evaluation.getYaw() / DTOR + " ; yaw=" + evaluation.start_yaw / DTOR + " ; diff=" + diff / DTOR);
+
+                            evaluation.StateChange();
+                        }
+
+                        evaluation.writeLog(0, 0, 0, 0, diff / (float)DTOR, diff * gain / (float)DTOR);
+                    }
+                    else if (evaluation.EXP_TYPE == ExperimentType.ET_TRANSLATION)
+                    {
+                        // Random parts
+                        if (evaluation.ActiveTrialNumber != e_lastTrial)
+                        {
+                            e_lastTrial = evaluation.ActiveTrialNumber;
+
+                            //evaluation.recenterPose();
+
+                            // Orientation (randomized in 360 degrees)
+                            //float r1 = UnityEngine.Random.value * (float)Mathf.PI * 2; // in [0,2PI]
+                            //evaluation.resetYaw = r1;
+                            //path.transform.eulerAngles = new Vector3(0, evaluation.resetYaw * Mathf.Rad2Deg, 0);
+
+                            //evaluation.start_p = evaluation.getPos();
+                            //evaluation.start_yaw = evaluation.getYaw();
+
+                            // Turn angle
+                            float r2 = UnityEngine.Random.value; // in [0,1]
+                            e_maxDistance = evaluation.DISTANCE - 0.5f + 0.5f * r2;
+                        }
+
+                        // Compute translation distance
+                        //NOTE: Assumes participants walk (0,0) -> (0,e_maxDistance)
+                        evaluation.reset();
+
+                        Quaternion correctionRot = Quaternion.Euler(new Vector3(0, evaluation.resetYaw * Mathf.Rad2Deg, 0));
+                        Vector3 start = correctionRot * new Vector3(evaluation.start_p.x, 0, evaluation.start_p.y);
+                        Vector3 pos = correctionRot * new Vector3(evaluation.getPos().x, 0, evaluation.getPos().y);
+
+                        Vector3 diff = new Vector3(pos.x - start.x, 0, pos.z - start.z);
+
+                        Quaternion correctionRotInv = Quaternion.Euler(new Vector3(0, -evaluation.resetYaw * Mathf.Rad2Deg, 0));
+
+                        Vector3 pos_new = new Vector3(evaluation.start_p.x, 0, evaluation.start_p.y) + (correctionRotInv * new Vector3(diff.x, 0, diff.z * gain));
+
+                        // Update position
+                        evaluation.setPosX(pos_new.x);
+                        evaluation.setPosY(pos_new.z);
+
+                        // Check angle
+                        if (Mathf.Abs(diff.z) * gain >= e_maxDistance)
+                        {
+                            evaluation.StateChange();
+                        }
+
+//                        evaluation.writeLog(evaluation.getPos().x, evaluation.start_p.y + diff, evaluation.getPos().x, evaluation.start_p.y + diff * gain, evaluation.getYaw() / (float)DTOR, evaluation.getYaw() / (float)DTOR);
+                    }
+                    else // Curvature
+                    {
+                        // Random parts
+                        if (evaluation.ActiveTrialNumber != e_lastTrial)
+                        {
+                            e_lastTrial = evaluation.ActiveTrialNumber;
+
+                            // Orientation (randomized in 360 degrees)
+                            //float r1 = UnityEngine.Random.value * (float)Mathf.PI * 2; // in [0,2PI]
+                            //evaluation.resetYaw = r1;
+                            //path.transform.eulerAngles = new Vector3(0, evaluation.resetYaw * Mathf.Rad2Deg, 0);
+                        }
+
+                        // Get curvature gain radius and direction
+                        float r = Mathf.Abs(evaluation.ActiveTrial.Value);
+                        bool leftTurn = (evaluation.ActiveTrial.Value < 0);
+
+                        evaluation.reset();
+
+                        Quaternion correctionRot = Quaternion.Euler(new Vector3(0, evaluation.resetYaw * Mathf.Rad2Deg, 0));
+                        Vector3 start = correctionRot * new Vector3(evaluation.start_p.x, 0, evaluation.start_p.y);
+                        Vector3 pos = correctionRot * new Vector3(evaluation.getPos().x, 0, evaluation.getPos().y);
+
+                        Vector3 diff = new Vector3(pos.x - start.x, 0, pos.z - start.z);
+
+                        // Get current 2D position
+                        Vector2 p = new Vector2(diff.x, diff.z);
+
+                        // Compute redirection
+                        Vector2 pt = new Vector2(0, 0);
+                        float theta = 0;
+                        Vector2 c;
+                        if (leftTurn)
+                        {
+                            c = new Vector2(-r, 0);
+                            Vector2 tmp = (p - c) / (p - c).magnitude;
+                            theta = Mathf.Acos(Mathf.Abs(tmp.x));
+//                            Debug.Log("acos(" + Mathf.Abs(tmp.x) + ")= " + Mathf.Acos(Mathf.Abs(tmp.x)));
+                            float sy = theta * r;
+                            float sx = (p - c).magnitude - r;
+                            pt = new Vector2(sx, sy);
+                        }
+                        else
+                        {
+                            c = new Vector2(r, 0);
+                            Vector2 tmp = (p - c) / (p - c).magnitude;
+                            theta = Mathf.Acos(Mathf.Abs(tmp.x));
+                            float sy = theta * r;
+                            float sx = r - (p - c).magnitude;
+                            pt = new Vector2(sx, sy);
+                        }
+
+                        float yaw = 0;
+                        if (leftTurn)
+                            yaw = evaluation.getYaw() + theta;
+                        else
+                            yaw = evaluation.getYaw() - theta;
+
+                        // Make sure we do not change anything if p.y<0
+                        if (p.y > 0)
+                        {
+                            Quaternion correctionRotInv = Quaternion.Euler(new Vector3(0, -evaluation.resetYaw * Mathf.Rad2Deg, 0));
+                            Vector3 pos_new = new Vector3(evaluation.start_p.x, 0, evaluation.start_p.y) + (correctionRotInv * new Vector3(pt.x, 0, pt.y));
+
+                            // Update position
+                            evaluation.setPosX(pos_new.x);
+                            evaluation.setPosY(pos_new.z);
+
+                            // Update orientation
+                            evaluation.setYawOffset(yaw);
+
+                            if (theta > 3.1415f / 2)
+                                Debug.Log("ERROR -- EXCEEDED");
+                            Debug.Log("left(" + leftTurn + ") -- center(" +c.x+ ", " +c.y+ ")  -- diff.x(" + diff.x + ") -- diff.z(" + diff.z + ") -- pt.x(" + pt.x + ") -- pt.z(" + pt.y + ") -- theta(" + theta / (float)DTOR + ") -- offsetYaw(" + evaluation.offsetYaw / (float)DTOR + ")");
+
+                            // Check walk distance
+                            if (Mathf.Abs(pt.y) >= evaluation.DISTANCE)
+                            {
+                                evaluation.StateChange();
+                            }
+                        }
+
+                        //// Get current 2D position
+                        //Vector2 p = evaluation.getPos();
+
+                        //// Compute redirection
+                        //Vector2 pt = new Vector2(0, 0);
+                        //float theta = 0;
+                        //if (leftTurn)
+                        //{
+                        //    Vector2 c = new Vector2(-r, 0);
+                        //    Vector2 tmp = (p - c) / (p - c).magnitude;
+                        //    theta = Mathf.Acos(Mathf.Abs(tmp.x));
+                        //    float sy = theta * r;
+                        //    float sx = (p - c).magnitude - r;
+                        //    pt = new Vector2(sx, sy);
+                        //}
+                        //else
+                        //{
+                        //    Vector2 c = new Vector2(r, 0);
+                        //    Vector2 tmp = (p - c) / (p - c).magnitude;
+                        //    theta = Mathf.Acos(Mathf.Abs(tmp.x));
+                        //    float sy = theta * r;
+                        //    float sx = r - (p - c).magnitude;
+                        //    pt = new Vector2(sx, sy);
+                        //}
+
+                        //float yaw = 0;
+                        //if (leftTurn)
+                        //    yaw = evaluation.getYaw() - theta;
+                        //else
+                        //    yaw = evaluation.getYaw() + theta;
+
+                        //// Make sure we do not change anything if p.y<0
+                        //if (p.y < 0)
+                        //{
+                        //    pt = p;
+                        //    yaw = evaluation.getYaw();
+                        //}
+
+                        //// Update position
+                        //evaluation.setPosX(pt.x);
+                        //evaluation.setPosY(pt.y);
+
+                        //// Update orientation
+                        //evaluation.setYawOffset(yaw);
+
+                        //// Check distance
+                        //float distance = evaluation.getPos().y;
+                        //if (distance >= evaluation.DISTANCE)
+                        //{
+                        //    evaluation.StateChange();
+                        //}
+
+                        //// Vary virtual start orientation
+                        //int currentTrial = evaluation.ActiveTrialNumber;
+                        //if (currentTrial != e_lastTrial)
+                        //{
+                        //    e_lastTrial = currentTrial;
+                        //    float rr = UnityEngine.Random.value; // in [0,1]
+                        //    if (rr < 0.25f)
+                        //        c_yawOffset = 0;
+                        //    else if (rr < 0.5f)
+                        //        c_yawOffset = (float)Mathf.PI / 2;
+                        //    else if (rr < 0.75f)
+                        //        c_yawOffset = (float)Mathf.PI;
+                        //    else
+                        //        c_yawOffset = (float)Mathf.PI * 3 / 2;
+                        //}
+                        //evaluation.setYawOffset(evaluation.getYaw() + c_yawOffset);
+                        //Vector2 ppp = evaluation.getPos();
+                        //evaluation.setPosX(ppp.x * Mathf.Cos(c_yawOffset) + ppp.y * -Mathf.Sin(c_yawOffset));
+                        //evaluation.setPosY(ppp.x * Mathf.Sin(c_yawOffset) + ppp.y * Mathf.Cos(c_yawOffset));
+
+                        //TODO
+                        //evaluation.writeLog(orig_pos.x, evaluation.getPos(), orig_yaw, evaluation.getYaw());
+                    }
+                }
+                break;
+
+            case ExperimentState.ES_QUESTION:
+                {
+                    quad_user.GetComponent<Renderer>().enabled = false;
+                    quad.GetComponent<Renderer>().enabled = true;
+                    if (evaluation.EXP_TYPE == ExperimentType.ET_ROTATION)
+                        quad.GetComponent<Renderer>().material.mainTexture = pQuestionR_;
+                    else if (evaluation.EXP_TYPE == ExperimentType.ET_TRANSLATION)
+                        quad.GetComponent<Renderer>().material.mainTexture = pQuestionT_;
+                    else // Curvature
+                        quad.GetComponent<Renderer>().material.mainTexture = pQuestionC_;
+                }
+                break;
+
+            case ExperimentState.ES_INSTRUCTION:
+                {
+                    quad_user.GetComponent<Renderer>().enabled = true;
+                    quad.GetComponent<Renderer>().enabled = true;
+
+                    if (evaluation.EXP_TYPE == ExperimentType.ET_ROTATION)
+                    {
+                        evaluation.StateChange();
+                        break;
+                    }
+
+                    // Relative coordinates for reset
+                    Vector2 startP_rel = evaluation.start_p + evaluation.resetPos;
+                    Vector2 pos_rel = evaluation.getPos() + evaluation.resetPos;
+                    float yaw_rel = evaluation.getYaw() + evaluation.resetYaw;
+
+                    // Compute coordinate system
+                    float distance = startP_rel.magnitude;
+                    Vector2 dir = startP_rel / distance;
+                    Vector2 strafe = new Vector2(dir.y, -dir.x);
+
+                    // Compute current 2D position
+                    Vector2 p = pos_rel;
+                    p = p / distance;
+                    float dd = dir.x * p.x + dir.y * p.y;
+                    float ds = strafe.x * p.x + strafe.y * p.y;
+
+                    // Compute screen position
+                    float x = ds / 10.0f;
+                    float y = dd / 10.0f;
+                    float markX = x;
+                    float markY = y;
+
+                    // Draw background
+                    quad.GetComponent<Renderer>().material.mainTexture = pAdjust_;
+
+                    // Check if user is close to center
+                    const float POS_THRESHOLD_BROAD = 0.5f;
+                    const float POS_THRESHOLD_FINE = 0.15f;
+                    if (pos_rel.magnitude < POS_THRESHOLD_BROAD)
+                    {
+                        // Draw user marker
+                        float theta = yaw_rel;
+                        quad_user.GetComponent<Renderer>().material.mainTexture = pUser_;
+                        quad_user.transform.localPosition = new Vector3(pos_rel.x * 0.25f, pos_rel.y * 0.25f, 0.5f);
+                        quad_user.transform.localEulerAngles = new Vector3(0, 0, -theta / (float)DTOR);
+
+                        // Check if user is close to start orientation
+                        const float ORI_THRESHOLD = 5.0f * (float)DTOR;
+                        if (Mathf.Abs(periodicMinusPeriodic(yaw_rel, 0)) < ORI_THRESHOLD && pos_rel.magnitude < POS_THRESHOLD_FINE)
+                            evaluation.StateChange();
+                    }
+                    else
+                    {
+                        // Compute rotation angle
+                        float angle = Mathf.Acos(Mathf.Abs(dir.y));
+                        if (dir.x < 0)
+                            angle *= -1;
+
+                        float theta = yaw_rel - angle;
+
+                        // Draw user marker
+                        /*if (evaluation.EXP_TYPE == ExperimentType.ET_CURVATURE)
+                        {
+                            Vector2 ppp = pos_rel - startP_rel;
+                            float ddd = ppp.magnitude;
+                            if (ddd > 1.0f)
+                            {
+                                quad_user.GetComponent<Renderer>().material.mainTexture = pUser_;
+                                quad_user.transform.localPosition = new Vector3(markX, markY, 0.5f);
+                                quad_user.transform.localEulerAngles = new Vector3(0, 0, -theta / (float)DTOR);
+                            }
+                            else
+                            {
+                                quad_user.GetComponent<Renderer>().material.mainTexture = pUserNoDir_;
+                                quad_user.transform.localPosition = new Vector3(markX, markY, 0.5f);
+                                quad_user.transform.localEulerAngles = new Vector3(0, 0, -theta / (float)DTOR);
+                            }
+                        }
+                        else*/
+                        {
+                            quad_user.GetComponent<Renderer>().material.mainTexture = pUserNoDir_;
+                            quad_user.transform.localPosition = new Vector3(markX, markY, 0.5f);
+                            quad_user.transform.localEulerAngles = new Vector3(0, 0, -theta / (float)DTOR);
+                        }
+                    }
+                }
+                break;
+
+            case ExperimentState.ES_THANKYOU:
+                {
+                    quad_user.GetComponent<Renderer>().enabled = false;
+                    quad.GetComponent<Renderer>().enabled = true;
+                    quad.GetComponent<Renderer>().material.mainTexture = pThankYou_;
+                }
+                break;
+        }
+    }
+}
